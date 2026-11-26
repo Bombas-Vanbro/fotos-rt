@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b4079">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Fotos do RT</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icone-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script src="config.js"></script>
+<!-- Página do celular. Funciona de três jeitos, com o mesmo arquivo:
+     - App instalável (PWA, pasta pwa/: tools/build-pwa.ps1 troca o marcador __PWA__ pelo manifesto e o config.js):
+       envia por fetch (POST, texto JSON) para o doPost do Apps Script, com a chave de acesso;
+     - Google Apps Script (apps-script-fotos/: este arquivo vira o Index.html do projeto): envia por google.script.run
+       para a pasta "Fotos RT" do Google Drive;
+     - Receptor de Fotos.exe (http://<IP da máquina>:8767/, página embutida no .exe): envia por HTTP para a pasta dos laudos.
+     Tira a foto com a câmera do aparelho, reduz para 1600 px e envia com o nº do RT e a parte (elétrico/mecânico).
+     Sem conexão, a foto fica guardada no celular (IndexedDB) e sobe sozinha depois. -->
+<style>
+:root{--bg:#eef1f4;--surface:#fff;--ink:#263238;--muted:#6c757d;--line:#dde2e7;--accent:#1b4079;--accent-soft:#eaf1f9;
+  --ok:#198754;--ok-soft:#e3f3ea;--warn:#b7791f;--warn-soft:#fdf3dd;--bad:#dc3545;--bad-soft:#fbe5e7;--r:12px}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+header{background:linear-gradient(135deg,#1b4079,#245596);color:#fff;padding:14px 16px calc(14px);padding-top:max(14px,env(safe-area-inset-top))}
+header h1{margin:0;font-size:19px;font-weight:700}
+header p{margin:2px 0 0;font-size:13px;opacity:.85}
+main{padding:14px 16px 40px;max-width:560px;margin:0 auto}
+.card{background:var(--surface);border-radius:var(--r);padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+label.rot{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px}
+input[type=text],input[type=tel],input[type=search]{width:100%;font:inherit;padding:12px;border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+input:focus{outline:none;border-color:var(--accent)}
+#rt{font-size:26px;font-weight:700;letter-spacing:1px;font-family:ui-monospace,Consolas,monospace}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg button{font:inherit;font-weight:600;padding:13px 8px;border-radius:10px;border:1.5px solid var(--line);background:#fff;color:var(--ink)}
+.seg button[aria-pressed=true]{border-color:var(--accent);background:var(--accent);color:#fff}
+.mt{margin-top:12px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;font:inherit;font-weight:700;border:0;border-radius:12px;padding:18px;background:var(--accent);color:#fff;font-size:19px}
+.btn:disabled{opacity:.4}
+.btn.sec{background:#fff;color:var(--accent);border:1.5px solid var(--accent);font-size:15px;padding:12px;font-weight:600}
+.btn svg{width:26px;height:26px;flex:none}
+.aviso{border-radius:10px;padding:10px 12px;font-size:14px;margin-top:10px}
+.aviso.ok{background:var(--ok-soft);color:#0f5132}
+.aviso.warn{background:var(--warn-soft);color:#6b4a0f}
+.aviso.bad{background:var(--bad-soft);color:#842029}
+.aviso[hidden]{display:none}
+h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+h2 small{font-weight:400;color:var(--muted)}
+.grade{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ft{position:relative;border-radius:8px;overflow:hidden;background:#dfe4e9;aspect-ratio:3/4}
+.ft img{width:100%;height:100%;object-fit:cover;display:block}
+.ft .tag{position:absolute;left:4px;top:4px;font-size:11px;font-weight:700;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.6);color:#fff}
+.ft .tag.m{background:rgba(235,104,52,.9)}.ft .tag.e{background:rgba(42,120,214,.9)}
+.ft .st{position:absolute;left:0;right:0;bottom:0;font-size:11px;padding:3px 5px;background:rgba(0,0,0,.6);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ft .st.pend{background:rgba(183,121,31,.92)}
+.ft .st.usada{background:rgba(25,135,84,.92)}
+.ft .ph{position:absolute;inset:0;display:grid;place-items:center;color:#7d8b98;font-size:12px;text-align:center;padding:6px}
+.ft .x.conf{background:var(--bad)}
+.ft .x{position:absolute;right:4px;top:4px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:30px;padding:0}
+.vazio{color:var(--muted);font-size:14px}
+/* Histórico: últimos 15 dias */
+#histBusca{font-size:16px;padding:10px 12px}
+.dia{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 4px}
+.hrow{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;text-align:left;font:inherit;color:var(--ink);background:none;border:0;border-top:1px solid var(--line);padding:10px 2px;cursor:pointer}
+.dia+.hrow{border-top:0}
+.hrow .n{font-family:ui-monospace,Consolas,monospace;font-weight:700;font-size:17px}
+.hrow .h{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.hrow .c{grid-column:1/-1;font-size:13px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.hrow .c i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.hrow .c .ie{background:#2a78d6}.hrow .c .im{background:#eb6834}
+.hrow .c .sub{color:#8a5a00;font-weight:600}
+.hrow.atual{background:var(--accent-soft);border-radius:8px}
+.link{background:none;border:0;padding:4px;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
+input[type=password]{width:100%;font:inherit;padding:12px;border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.btn.fim{background:var(--ok);font-size:16px;padding:14px}
+.btn.fim svg{width:22px;height:22px}
+.pe{font-size:12.5px;color:var(--muted);text-align:center;margin-top:16px}
+.status{display:inline-block;width:9px;height:9px;border-radius:50%;background:#aaa;margin-right:4px}
+.status.on{background:#3ddc84}.status.off{background:#ff6b6b}
+</style>
+</head>
+<body>
+<header>
+  <h1>Fotos do RT · Vanbro</h1>
+  <p><span class="status" id="luz"></span><span id="conexao">Conectando…</span></p>
+</header>
+<main>
+  <div class="card" id="cardConfig" hidden>
+    <h2>Configurar este celular</h2>
+    <p class="vazio" style="margin:0 0 10px">Digite a chave de acesso das fotos do RT (peça a quem administra o app). Ela fica guardada neste celular.</p>
+    <div id="cfgUrlBox" hidden>
+      <label class="rot" for="cfgUrl">Endereço do Apps Script (termina em /exec)</label>
+      <input type="text" id="cfgUrl" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+    </div>
+    <label class="rot mt" for="cfgChave">Chave de acesso</label>
+    <input type="password" id="cfgChave" autocomplete="off" spellcheck="false">
+    <button type="button" class="btn mt" id="cfgSalvar">Salvar e testar</button>
+    <div class="aviso" id="cfgMsg" hidden></div>
+  </div>
+  <div class="card">
+    <label class="rot" for="rt">Nº do RT (relatório técnico)</label>
+    <input type="tel" id="rt" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="ex.: 322855" maxlength="12">
+    <label class="rot mt">Fotos do laudo</label>
+    <div class="seg" id="parte">
+      <button type="button" data-p="eletrico" aria-pressed="true">Elétrico</button>
+      <button type="button" data-p="mecanico" aria-pressed="false">Mecânico</button>
+    </div>
+    <label class="rot mt" for="legenda">Legenda da próxima foto <span style="font-weight:400">(opcional)</span></label>
+    <input type="text" id="legenda" maxlength="80" placeholder="ex.: Bobinado queimado" autocomplete="off">
+    <button type="button" class="btn mt" id="btnFoto" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      Tirar foto
+    </button>
+    <button type="button" class="btn sec mt" id="btnGaleria" disabled>Escolher da galeria</button>
+    <input type="file" id="inCamera" accept="image/*" capture="environment" hidden>
+    <input type="file" id="inGaleria" accept="image/*" multiple hidden>
+    <div class="aviso" id="msg" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>Fotos deste RT <small id="contagem"></small></h2>
+    <div class="grade" id="grade"></div>
+    <div class="vazio" id="vazio">Digite o nº do RT para ver as fotos já enviadas.</div>
+    <button type="button" class="btn fim mt" id="btnFinalizar" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+      Finalizar RT e começar outro
+    </button>
+  </div>
+  <div class="card" id="cardHist">
+    <h2>Últimos 15 dias <small id="histInfo"></small></h2>
+    <input type="search" id="histBusca" inputmode="numeric" placeholder="Buscar nº do RT" autocomplete="off" aria-label="Buscar nº do RT no histórico">
+    <div id="histLista"><div class="vazio mt">Carregando…</div></div>
+    <button type="button" class="btn sec mt" id="histMais" hidden>Mostrar mais</button>
+  </div>
+  <p class="pe">As fotos vão para a pasta <b>Fotos RT</b> e entram sozinhas no laudo quando o PDF do RT for lido na ferramenta Laudo Técnico.</p>
+  <p class="pe"><button type="button" id="trocarChave" class="link" hidden>Trocar a chave de acesso</button></p>
+</main>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const PARTES={eletrico:"Elétrico",mecanico:"Mecânico"};
+const RE_RT=/^\d{3,12}$/;
+const guardar=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const lembrar=k=>{try{return localStorage.getItem(k)||""}catch(e){return ""}};
+let parte=lembrar("parte")==="mecanico"?"mecanico":"eletrico";
+let enviadas=[];          /* fotos que já chegaram ao destino, deste RT */
+let pendentes=[];         /* fotos guardadas no celular esperando envio (todas, de qualquer RT) */
+const urls=new Map();     /* id -> objectURL da miniatura das pendentes */
+
+/* ---------- Fila no celular (IndexedDB): nada se perde se o Wi-Fi ou o computador cair ---------- */
+let dbP=null;
+let memoria=null;         /* navegador sem IndexedDB (bloqueado no quadro do Apps Script, aba anônima…): fila só na memória */
+function db(){
+  if(!dbP)dbP=new Promise((ok,ko)=>{
+    const r=indexedDB.open("fotos-rt",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("fila",{keyPath:"id"});
+    r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error);
+  });
+  return dbP;
+}
+async function fila(modo,fn){
+  if(!memoria){
+    try{
+      const d=await db();
+      return await new Promise((ok,ko)=>{
+        const t=d.transaction("fila",modo),s=t.objectStore("fila");
+        const r=fn(s);t.oncomplete=()=>ok(r&&r.result);t.onerror=()=>ko(t.error);
+      });
+    }catch(e){
+      memoria=new Map();console.warn("Fila de fotos só na memória:",e);
+      aviso("warn","Este navegador não deixa guardar fotos no celular: mantenha esta página aberta até elas subirem.");
+    }
+  }
+  /* Mesmas operações do IndexedDB, num Map */
+  const s={getAll:()=>({result:[...memoria.values()]}),put:v=>{memoria.set(v.id,v);return {}},delete:id=>{memoria.delete(id);return {}}};
+  const r=fn(s);return r&&r.result;
+}
+const lerFila=()=>fila("readonly",s=>s.getAll());
+const porNaFila=item=>fila("readwrite",s=>s.put(item));
+const tirarDaFila=id=>fila("readwrite",s=>s.delete(id));
+
+/* ---------- Tela ---------- */
+function aviso(tipo,txt){const m=$("#msg");m.className="aviso "+tipo;m.textContent=txt;m.hidden=!txt}
+function rtAtual(){return $("#rt").value.trim()}
+function syncBotoes(){
+  const ok=RE_RT.test(rtAtual());
+  $("#btnFoto").disabled=$("#btnGaleria").disabled=!ok;
+}
+function setParte(p){
+  parte=p;guardar("parte",p);
+  document.querySelectorAll("#parte button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.p===p)));
+}
+function render(){
+  const rt=rtAtual(),g=$("#grade");
+  const pend=pendentes.filter(f=>f.rt===rt).sort((a,b)=>a.quando.localeCompare(b.quando));
+  const itens=[
+    ...enviadas.map(f=>({src:API.img(rt,f),parte:f.parte,legenda:f.legenda,st:f.usada?"usada":"ok",arquivo:f.arquivo})),
+    ...pend.map(f=>{if(!urls.has(f.id))urls.set(f.id,URL.createObjectURL(f.blob));return {src:urls.get(f.id),parte:f.parte,legenda:f.legenda,st:"pend",id:f.id}})
+  ];
+  g.innerHTML=itens.map((f,i)=>`<div class="ft">${f.src?`<img src="${f.src}" alt="" loading="lazy">`:`<span class="ph">foto no ${DESTINO}</span>`}
+    <span class="tag ${f.parte==="mecanico"?"m":"e"}">${PARTES[f.parte]}</span>
+    ${f.st==="usada"?"":`<button type="button" class="x" data-i="${i}" aria-label="Apagar foto">×</button>`}
+    <span class="st ${f.st}">${f.st==="pend"?"aguardando envio":f.st==="usada"?"já no laudo":esc(f.legenda||"enviada")}</span></div>`).join("");
+  /* Apagar pede um segundo toque no × (sem a caixa de confirmação do navegador) */
+  g.querySelectorAll(".x").forEach(b=>b.onclick=()=>{
+    if(!b.classList.contains("conf")){b.classList.add("conf");b.textContent="✓";b.setAttribute("aria-label","Toque de novo para apagar");setTimeout(()=>{if(b.isConnected){b.classList.remove("conf");b.textContent="×"}},3000);return}
+    apagar(itens[+b.dataset.i]);
+  });
+  const ne=enviadas.filter(f=>f.parte==="eletrico").length,nm=enviadas.length-ne;
+  $("#contagem").textContent=RE_RT.test(rt)&&itens.length?`· ${ne} elétrico, ${nm} mecânico${pend.length?` · ${pend.length} aguardando`:""}`:"";
+  $("#vazio").hidden=!!itens.length;
+  $("#btnFinalizar").hidden=!(RE_RT.test(rt)&&itens.length);
+  $("#vazio").textContent=RE_RT.test(rt)?"Nenhuma foto deste RT ainda.":"Digite o nº do RT para ver as fotos já enviadas.";
+  renderHist();   /* o histórico mostra também o que ainda está subindo */
+  const outros=pendentes.filter(f=>f.rt!==rt).length;
+  if(outros&&!$("#msg").textContent)aviso("warn",`${outros} foto(s) de outro RT aguardando envio.`);
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- Comunicação: Google Apps Script (google.script.run) ou Receptor de Fotos.exe (HTTP) ---------- */
+const GAS=typeof google!=="undefined"&&!!(google.script&&google.script.run);
+const APP=!GAS&&!!window.FOTOS_CONFIG;   /* app instalável (PWA): config.js define FOTOS_CONFIG = {api: "…/exec"} */
+const PRECISA_CHAVE=GAS||APP;              /* o receptor da rede local não usa chave */
+const DESTINO=GAS||APP?"Google Drive":"computador";
+let chave=lembrar("chave");
+const apiUrl=()=>(window.FOTOS_CONFIG&&FOTOS_CONFIG.api)||lembrar("api");
+let online=null;
+function luz(on,txt){
+  online=on;$("#luz").className="status "+(on?"on":"off");$("#conexao").textContent=txt;
+}
+const semConexao=()=>`Sem conexão com o ${DESTINO}: as fotos ficam guardadas e sobem depois`;
+async function pedir(url,op={}){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),op.tempo||20000);
+  try{
+    const r=await fetch(url,{...op,signal:c.signal,cache:"no-store"});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){const e=new Error(j.erro||("erro "+r.status));e.status=r.status;throw e}
+    return j;
+  }finally{clearTimeout(t)}
+}
+/* No Apps Script os erros vêm como "400|mensagem" (o código do erro antes da barra) */
+function gas(fn,args,tempo=60000){
+  return new Promise((ok,ko)=>{
+    const t=setTimeout(()=>ko(new Error("sem resposta do Google")),tempo);
+    google.script.run.withSuccessHandler(r=>{clearTimeout(t);ok(r)}).withFailureHandler(e=>{
+      clearTimeout(t);const m=String(e&&e.message||e),x=m.match(/^(\d{3})\|(.*)$/s);
+      const err=new Error(x?x[2]:m);if(x)err.status=+x[1];ko(err);
+    })[fn](...args);
+  });
+}
+/* App instalável: POST para o doPost do Apps Script. Texto JSON (sem "preflight" de CORS); erros vêm como {ok:false, status, erro} */
+async function post(acao,dados,tempo=60000){
+  if(!apiUrl()){const e=new Error("endereço do Apps Script não configurado");e.status=401;throw e}
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),tempo);
+  try{
+    const r=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({chave,acao,dados}),signal:c.signal,redirect:"follow",cache:"no-store"});
+    let j;try{j=await r.json()}catch(e){throw new Error("resposta inesperada do Google ("+r.status+")")}
+    if(!j.ok){const e=new Error(j.erro||"erro");e.status=j.status;throw e}
+    return j.resultado;
+  }catch(e){if(e.name==="AbortError")throw new Error("sem resposta do Google");throw e}
+  finally{clearTimeout(t)}
+}
+/* Mesma chamada pelos dois caminhos do Google (página do script ou app instalável) */
+const google_=(acao,dados,tempo)=>APP?post(acao,dados,tempo):gas("chamar",[{chave,acao,dados}],tempo);
+const base64=blob=>new Promise((ok,ko)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=()=>ko(r.error);r.readAsDataURL(blob)});
+const recentes=new Map();   /* arquivo enviado -> miniatura local (o Drive demora para gerar a dele) */
+const API=PRECISA_CHAVE?{
+  ping:()=>google_("ping",[],20000),
+  listar:rt=>google_("listar",[rt],30000),
+  enviar:async f=>{const r=await google_("enviar",[{rt:f.rt,parte:f.parte,legenda:f.legenda||"",id:f.id,quando:f.quando,jpeg:await base64(f.blob)}],120000);if(r&&r.arquivo)recentes.set(r.arquivo,URL.createObjectURL(f.blob));return r},
+  apagar:(rt,arq)=>google_("apagar",[rt,arq]),
+  historico:()=>google_("historico",[],45000),
+  img:(rt,f)=>f.thumb||recentes.get(f.arquivo)||""
+}:{
+  ping:()=>pedir("/api/ping"),
+  listar:rt=>pedir("/api/fotos?rt="+encodeURIComponent(rt)),
+  enviar:f=>pedir("/api/foto?"+new URLSearchParams({rt:f.rt,parte:f.parte,legenda:f.legenda||"",id:f.id,quando:f.quando}),{method:"POST",headers:{"Content-Type":"image/jpeg"},body:f.blob,tempo:90000}),
+  historico:()=>pedir("/api/historico"),
+  apagar:(rt,arq)=>pedir(`/api/apagar?rt=${encodeURIComponent(rt)}&arquivo=${encodeURIComponent(arq)}`,{method:"POST"}),
+  img:(rt,f)=>`/api/imagem?rt=${encodeURIComponent(rt)}&arquivo=${encodeURIComponent(f.arquivo)}`
+};
+async function atualizarEnviadas(){
+  const rt=rtAtual();
+  if(!RE_RT.test(rt)){enviadas=[];render();return}
+  try{
+    const l=await API.listar(rt);
+    if(rt===rtAtual())enviadas=Array.isArray(l)?l:[];
+    luz(true,"Conectado ao "+DESTINO);
+  }catch(e){
+    if(e.status===401)pedirChave(e.message);else if(e.status===503)luz(false,e.message);else luz(false,semConexao());
+  }
+  render();
+}
+let enviando=false;
+async function enviarFila(){
+  if(enviando)return;enviando=true;
+  let enviou=0;
+  try{
+    pendentes=await lerFila();
+    for(const f of [...pendentes].sort((a,b)=>a.quando.localeCompare(b.quando))){
+      try{
+        await API.enviar(f);
+      }catch(e){
+        if(e.status===401){pedirChave(e.message);break}
+        if(e.status===400){aviso("bad",`Uma foto do RT ${f.rt} foi recusada pelo ${DESTINO} (${e.message}) e foi descartada.`);await tirarDaFila(f.id);continue}
+        luz(false,e.status===503?e.message:semConexao());
+        break;
+      }
+      await tirarDaFila(f.id);enviou++;
+      if(urls.has(f.id)){URL.revokeObjectURL(urls.get(f.id));urls.delete(f.id)}
+      luz(true,"Conectado ao "+DESTINO);
+    }
+    pendentes=await lerFila();
+  }finally{enviando=false}
+  await atualizarEnviadas();
+  if(enviou)carregarHist();
+}
+async function apagar(f){
+  try{
+    if(f.st==="pend"){await tirarDaFila(f.id);pendentes=await lerFila()}
+    else await API.apagar(rtAtual(),f.arquivo);
+    aviso("","");carregarHist();
+  }catch(e){aviso("bad","Não consegui apagar: "+e.message)}
+  atualizarEnviadas();
+}
+
+/* ---------- Foto: reduz no celular (1600 px, JPEG) para subir rápido pelo Wi-Fi ---------- */
+function reduzir(file){
+  return new Promise((ok,ko)=>{
+    const u=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{
+      const k=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
+      const c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*k);c.height=Math.round(img.naturalHeight*k);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);
+      c.toBlob(b=>b?ok(b):ko(new Error("não consegui converter a foto")),"image/jpeg",.85);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(u);ko(new Error("o arquivo não é uma imagem"))};
+    img.src=u;
+  });
+}
+const novoId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+async function receber(files){
+  const rt=rtAtual();
+  if(!RE_RT.test(rt)){aviso("bad","Digite o nº do RT antes da foto.");return}
+  files=[...files].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|heic|webp)$/i.test(f.name));
+  if(!files.length)return;
+  const leg=$("#legenda").value.trim();
+  aviso("",`Preparando ${files.length} foto(s)…`);
+  let n=0;
+  for(const f of files){
+    try{
+      const blob=await reduzir(f);
+      await porNaFila({id:novoId(),rt,parte,legenda:leg,blob,quando:new Date().toISOString()});
+      n++;
+    }catch(e){aviso("bad",`Não consegui usar ${f.name||"a foto"}: ${e.message}`)}
+  }
+  $("#legenda").value="";
+  if(n)aviso("ok",`${n} foto(s) do ${PARTES[parte].toLowerCase()} · RT ${rt}. Enviando…`);
+  pendentes=await lerFila();render();
+  await enviarFila();
+  if(n&&!pendentes.some(f=>f.rt===rt))aviso("ok",`${n} foto(s) do ${PARTES[parte].toLowerCase()} enviada(s) · RT ${rt}.`);
+}
+
+/* ---------- Eventos ---------- */
+/* ---------- Histórico: RTs fotografados nos últimos 15 dias (de todos os celulares) ---------- */
+let hist=[],histOk=false,histLimite=40;
+async function carregarHist(){
+  if(PRECISA_CHAVE&&!chave)return;
+  try{const l=await API.historico();hist=Array.isArray(l)?l:[];histOk=true}
+  catch(e){histOk=false}
+  renderHist();
+}
+const z2=n=>String(n).padStart(2,"0");
+function diaDe(iso){
+  const d=new Date(iso);if(isNaN(d))return "";
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const x=new Date(d);x.setHours(0,0,0,0);
+  const dif=Math.round((hoje-x)/864e5);
+  const sem=["domingo","segunda","terça","quarta","quinta","sexta","sábado"][d.getDay()];
+  return dif===0?"Hoje":dif===1?"Ontem":`${sem}, ${z2(d.getDate())}/${z2(d.getMonth()+1)}`;
+}
+function renderHist(){
+  /* Junta as fotos ainda guardadas no celular (sem conexão, não estão no histórico do servidor) */
+  const por=new Map(hist.map(x=>[x.rt,{...x,sub:0}]));
+  for(const f of pendentes){
+    const x=por.get(f.rt)||{rt:f.rt,e:0,m:0,ultima:"",sub:0};
+    x.sub++;const q=f.quando.slice(0,19);if(q>x.ultima)x.ultima=q;por.set(f.rt,x);
+  }
+  const busca=$("#histBusca").value.replace(/\D/g,"");
+  let l=[...por.values()].sort((a,b)=>b.ultima.localeCompare(a.ultima));
+  const total=l.length;
+  if(busca)l=l.filter(x=>x.rt.includes(busca));
+  const mostra=l.slice(0,histLimite),atual=rtAtual();
+  let html="",dia="";
+  for(const x of mostra){
+    const d=diaDe(x.ultima);if(d!==dia){dia=d;html+=`<div class="dia">${esc(d)}</div>`}
+    const t=new Date(x.ultima);
+    html+=`<button type="button" class="hrow${x.rt===atual?" atual":""}" data-rt="${esc(x.rt)}"><span class="n">RT ${esc(x.rt)}</span><span class="h">${isNaN(t)?"":z2(t.getHours())+":"+z2(t.getMinutes())}</span>`
+      +`<span class="c">${x.e?`<span><i class="ie"></i>${x.e} elétrico</span>`:""}${x.m?`<span><i class="im"></i>${x.m} mecânico</span>`:""}${x.sub?`<span class="sub">${x.sub} subindo</span>`:""}</span></button>`;
+  }
+  if(!mostra.length)html=`<div class="vazio mt">${busca?"Nenhum RT com esse número nos últimos 15 dias.":histOk?"Nenhuma foto nos últimos 15 dias.":"Sem conexão: o histórico aparece quando a conexão voltar."}</div>`;
+  $("#histLista").innerHTML=html;
+  $("#histLista").querySelectorAll(".hrow").forEach(b=>b.onclick=()=>abrirRT(b.dataset.rt));
+  $("#histMais").hidden=l.length<=histLimite;
+  $("#histInfo").textContent=total?`· ${total} RT(s)`:"";
+}
+function abrirRT(rt){
+  $("#rt").value=rt;guardar("rt",rt);syncBotoes();aviso("","");enviadas=[];render();
+  window.scrollTo({top:0,behavior:"smooth"});
+  atualizarEnviadas();
+}
+$("#histBusca").addEventListener("input",()=>{histLimite=40;renderHist()});
+$("#histMais").onclick=()=>{histLimite+=40;renderHist()};
+
+/* Finalizar: volta a tela ao estado inicial para o próximo orçamento. Não apaga nada; o que ainda está subindo continua na fila. */
+$("#btnFinalizar").onclick=()=>{
+  const rt=rtAtual(),ne=enviadas.filter(f=>f.parte==="eletrico").length,nm=enviadas.length-ne;
+  const pend=pendentes.filter(f=>f.rt===rt).length;
+  $("#rt").value="";$("#legenda").value="";guardar("rt","");setParte("eletrico");
+  enviadas=[];syncBotoes();render();
+  aviso(pend?"warn":"ok",`RT ${rt} finalizado: ${ne+nm} foto(s) enviada(s) (${ne} elétrico, ${nm} mecânico)`+(pend?`, ${pend} ainda subindo (continuam na fila, pode seguir).`:".")+" Digite o próximo RT.");
+  window.scrollTo({top:0,behavior:"smooth"});
+  $("#rt").focus();
+  carregarHist();
+};
+$("#rt").value=lembrar("rt");
+setParte(parte);
+let tRT=0;
+$("#rt").addEventListener("input",()=>{
+  const v=$("#rt").value.replace(/\D/g,"");if(v!==$("#rt").value)$("#rt").value=v;
+  guardar("rt",v);syncBotoes();aviso("","");enviadas=[];render();
+  clearTimeout(tRT);tRT=setTimeout(atualizarEnviadas,400);
+});
+document.querySelectorAll("#parte button").forEach(b=>b.onclick=()=>setParte(b.dataset.p));
+$("#btnFoto").onclick=()=>$("#inCamera").click();
+$("#btnGaleria").onclick=()=>$("#inGaleria").click();
+["#inCamera","#inGaleria"].forEach(s=>$(s).addEventListener("change",e=>{const fs=[...e.target.files];e.target.value="";receber(fs)}));
+window.addEventListener("online",enviarFila);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)enviarFila()});
+setInterval(()=>{if(pendentes.length)enviarFila();else if(document.visibilityState==="visible")atualizarEnviadas()},15000);
+syncBotoes();
+/* ---------- Chave de acesso (Google): pedida uma vez em cada celular ---------- */
+function pedirChave(msg){
+  $("#cardConfig").hidden=false;$("#cfgUrlBox").hidden=!APP||!!(window.FOTOS_CONFIG&&FOTOS_CONFIG.api);
+  $("#cfgUrl").value=apiUrl();$("#cfgChave").value="";
+  const m=$("#cfgMsg");m.className="aviso "+(msg?"bad":"");m.textContent=msg&&chave?msg:"";m.hidden=!(msg&&chave);
+  luz(false,"Falta configurar a chave de acesso");
+  window.scrollTo({top:0});
+}
+$("#cfgSalvar").onclick=async()=>{
+  const k=$("#cfgChave").value.trim(),u=$("#cfgUrl").value.trim(),m=$("#cfgMsg");
+  if(!k){m.className="aviso bad";m.textContent="Digite a chave.";m.hidden=false;return}
+  if(!$("#cfgUrlBox").hidden){if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)){m.className="aviso bad";m.textContent="Cole o endereço do Apps Script que termina em /exec.";m.hidden=false;return}guardar("api",u)}
+  const antiga=chave;chave=k;
+  m.className="aviso";m.textContent="Testando…";m.hidden=false;
+  try{
+    await API.ping();
+    guardar("chave",k);$("#cardConfig").hidden=true;luz(true,"Conectado ao Google Drive");
+    aviso("ok","Celular configurado. Pode tirar as fotos.");
+    enviarFila();carregarHist();
+  }catch(e){
+    chave=antiga;m.className="aviso bad";
+    m.textContent=e.status===401?e.message:"Não consegui testar agora ("+e.message+"). Confira a internet e tente de novo.";
+  }
+};
+$("#trocarChave").onclick=()=>pedirChave("");
+$("#trocarChave").hidden=!PRECISA_CHAVE;
+/* App instalável: guarda a tela no celular (abre sem internet) */
+if(APP&&"serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(e=>console.warn("service worker:",e));
+if(PRECISA_CHAVE&&(!chave||(APP&&!apiUrl())))pedirChave("");
+else API.ping().then(j=>luz(true,PRECISA_CHAVE?"Conectado ao Google Drive":"Conectado ao computador "+(j.maquina||"")+(j.pasta?"":" (sem acesso à pasta dos laudos)"))).catch(e=>{if(e.status===401)pedirChave(e.message);else luz(false,"Sem conexão com o "+DESTINO)});
+enviarFila().catch(e=>aviso("bad","Erro na fila de fotos: "+e.message));
+carregarHist();
+setInterval(()=>{if(document.visibilityState==="visible")carregarHist()},60000);
+</script>
+</body>
+</html>
