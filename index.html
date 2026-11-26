@@ -259,7 +259,13 @@ async function post(acao,dados,tempo=60000){
     let j;try{j=await r.json()}catch(e){throw new Error("resposta inesperada do Google ("+r.status+")")}
     if(!j.ok){const e=new Error(j.erro||"erro");e.status=j.status;throw e}
     return j.resultado;
-  }catch(e){if(e.name==="AbortError")throw new Error("sem resposta do Google");throw e}
+  }catch(e){
+    if(e.name==="AbortError")throw new Error("sem resposta do Google");
+    /* "Failed to fetch" com internet: o Google respondeu sem liberar o app (implantação não está como "Qualquer pessoa",
+       ou a versão implantada ainda não tem o doPost) */
+    if(e instanceof TypeError&&navigator.onLine){const x=new Error("o Google recusou a conexão do app. No Apps Script: Implantar › Gerenciar implantações › lápis › Nova versão, com Quem pode acessar = Qualquer pessoa");x.recusado=true;throw x}
+    throw e;
+  }
   finally{clearTimeout(t)}
 }
 /* Mesma chamada pelos dois caminhos do Google (página do script ou app instalável) */
@@ -462,7 +468,7 @@ $("#cfgSalvar").onclick=async()=>{
     enviarFila();carregarHist();
   }catch(e){
     chave=antiga;m.className="aviso bad";
-    m.textContent=e.status===401?e.message:"Não consegui testar agora ("+e.message+"). Confira a internet e tente de novo.";
+    m.textContent=e.status===401?e.message:e.recusado?"Não consegui falar com o Google: "+e.message+".":"Não consegui testar agora ("+e.message+"). Confira a internet e tente de novo.";
   }
 };
 $("#trocarChave").onclick=()=>pedirChave("");

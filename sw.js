@@ -1,7 +1,7 @@
 /* App Fotos do RT: guarda a tela no celular para abrir sem internet.
    Tudo deste site (página, ícones, config) sai do cache na hora e é atualizado em segundo plano:
    uma versão nova publicada aparece na próxima vez que o app for aberto. O Apps Script (outro site) não passa por aqui. */
-const CACHE = 'fotos-rt-20261126144957';
+const CACHE = 'fotos-rt-20261126160005';
 const ARQUIVOS = ['./', 'index.html', 'manifest.webmanifest', 'config.js', 'icone-192.png', 'icone-512.png', 'icone-maskable-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
